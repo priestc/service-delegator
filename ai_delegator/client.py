@@ -33,9 +33,10 @@ def ask(task: str, prompt: str | None = None, *, project: str | None = None,
         images: list[bytes] | None = None, max_tokens: int | None = None,
         temperature: float | None = None, json_schema: dict | None = None,
         provider: str | None = None, model: str | None = None, extra: dict | None = None,
-        url: str | None = None, timeout: float = 900) -> dict:
+        provider_timeout: float | None = None, url: str | None = None, timeout: float = 900) -> dict:
     """Send a prompt for `task` and return the server's answer:
     {text, provider, model, call_id, duration_ms, input_tokens, output_tokens, notes}.
+    provider_timeout limits each provider attempt; timeout is for the whole HTTP request.
     Raises DelegatorError when no provider answers or the server can't be reached."""
     body = {"task": task, "project": project}
     if messages is not None:
@@ -43,7 +44,8 @@ def ask(task: str, prompt: str | None = None, *, project: str | None = None,
     else:
         body["prompt"] = prompt
     for k, v in (("system", system), ("max_tokens", max_tokens), ("temperature", temperature),
-                 ("json_schema", json_schema), ("provider", provider), ("model", model), ("extra", extra)):
+                 ("json_schema", json_schema), ("provider", provider), ("model", model), ("extra", extra),
+                 ("timeout", provider_timeout)):
         if v is not None:
             body[k] = v
     if images:

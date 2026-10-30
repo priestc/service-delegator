@@ -34,7 +34,7 @@ answer["provider"]   # whichever provider the task is set to
 ```
 
 Or plain HTTP: `POST /api/ask` with JSON `{"task", "project", "prompt" | "messages",
-"system", "images" (base64), "max_tokens", "temperature", "json_schema"}`.
+"system", "images" (base64), "max_tokens", "temperature", "json_schema", "timeout"}`.
 A task used for the first time is created with the `default` task's providers.
 
 **As an Ollama stand-in** — no code changes: point the project's Ollama URL at

@@ -34,6 +34,7 @@ class Request:
     temperature: float | None = None
     json_schema: dict | None = None      # ask for JSON matching this schema
     extra: dict = field(default_factory=dict)  # provider-specific request fields, passed through as-is
+    timeout: float | None = None         # seconds; defaults to CLOUD_TIMEOUT / LOCAL_TIMEOUT
 
 
 @dataclass
@@ -70,7 +71,7 @@ def _openai_compatible(base_url: str | None, conf_key: str, strict_schema: bool)
         from openai import OpenAI
 
         client = OpenAI(api_key=config.get("api", conf_key), base_url=base_url,
-                        timeout=CLOUD_TIMEOUT, max_retries=CLIENT_RETRIES)
+                        timeout=req.timeout or CLOUD_TIMEOUT, max_retries=CLIENT_RETRIES)
         messages = [{"role": m["role"], "content": m["content"]} for m in req.messages]
         kwargs = {}
         if req.json_schema is not None:
@@ -112,7 +113,7 @@ def _openai_compatible(base_url: str | None, conf_key: str, strict_schema: bool)
 def _ask_claude(req: Request, model: str) -> Result:
     from anthropic import Anthropic
 
-    client = Anthropic(api_key=config.get("api", "anthropic_key"), timeout=CLOUD_TIMEOUT,
+    client = Anthropic(api_key=config.get("api", "anthropic_key"), timeout=req.timeout or CLOUD_TIMEOUT,
                        max_retries=CLIENT_RETRIES)
     messages = [{"role": m["role"], "content": m["content"]} for m in req.messages]
     if req.images:
@@ -151,7 +152,7 @@ def _ask_google(req: Request, model: str) -> Result:
     from google.genai import types
 
     client = genai.Client(api_key=config.get("api", "google_ai_key"),
-                          http_options=types.HttpOptions(timeout=CLOUD_TIMEOUT * 1000))
+                          http_options=types.HttpOptions(timeout=int((req.timeout or CLOUD_TIMEOUT) * 1000)))
     last_user = _last_user_index(req.messages)
     contents = []
     for i, m in enumerate(req.messages):
@@ -213,7 +214,7 @@ def _ask_ollama(req: Request, model: str) -> Result:
         body["format"] = req.json_schema
     url = config.ollama_url()
     try:
-        resp = httpx.post(f"{url}/api/chat", json=body, timeout=LOCAL_TIMEOUT)
+        resp = httpx.post(f"{url}/api/chat", json=body, timeout=req.timeout or LOCAL_TIMEOUT)
     except httpx.HTTPError as e:
         raise ProviderError(f"Could not reach Ollama at {url}: {e}")
     if resp.status_code != 200:

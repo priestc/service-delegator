@@ -43,8 +43,9 @@ def _parse_ask(data: dict) -> tuple[Request | None, str | None]:
     try:
         max_tokens = int(data["max_tokens"]) if data.get("max_tokens") is not None else 0
         temperature = float(data["temperature"]) if data.get("temperature") is not None else None
+        timeout = float(data["timeout"]) if data.get("timeout") is not None else None
     except (TypeError, ValueError):
-        return None, "max_tokens and temperature must be numbers"
+        return None, "max_tokens, temperature and timeout must be numbers"
     schema = data.get("json_schema")
     if schema is not None and not isinstance(schema, dict):
         return None, "json_schema must be an object"
@@ -52,15 +53,15 @@ def _parse_ask(data: dict) -> tuple[Request | None, str | None]:
     if not isinstance(extra, dict):
         return None, "extra must be an object"
     return Request(messages=messages, system=data.get("system"), images=images, max_tokens=max_tokens,
-                   temperature=temperature, json_schema=schema, extra=extra), None
+                   temperature=temperature, json_schema=schema, extra=extra, timeout=timeout), None
 
 
 @app.post("/api/ask")
 def api_ask():
     """Body: task (required), project, prompt or messages, and optionally system,
     images (base64 strings or {data, media_type}), max_tokens, temperature,
-    json_schema, extra (provider-specific fields), provider + model (to bypass
-    the task's routes)."""
+    json_schema, extra (provider-specific fields), timeout (seconds per provider
+    attempt), provider + model (to bypass the task's routes)."""
     data = request.get_json(silent=True) or {}
     task = (data.get("task") or "").strip()
     if not task:

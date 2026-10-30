@@ -133,6 +133,7 @@ def ask(task_name: str, req: Request, project: str | None = None,
                 temperature=req.temperature if req.temperature is not None else opts.get("temperature"),
                 json_schema=req.json_schema,
                 extra={**p.default_extra, **opts.get("extra", {}).get(p.name, {}), **req.extra},
+                timeout=req.timeout or opts.get("timeout"),
             )
             call_id = start_call(conn, project=project, task=task_name, provider=p.name, model=use_model,
                                  local=p.local, via="ask", n_images=len(req.images), prompt_preview=prompt_preview)
