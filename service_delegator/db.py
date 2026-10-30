@@ -1,11 +1,12 @@
-"""SQLite storage: every call made through the delegator, GPU samples taken
-during local (Ollama) calls, and the task -> provider routing."""
+"""SQLite storage: every call made through the delegator (AI prompts and
+proxied web API requests), GPU samples taken during local (Ollama) calls, and
+the task -> provider routing."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
-from ai_delegator import config
+from service_delegator import config
 
 
 def connect() -> sqlite3.Connection:
@@ -18,9 +19,11 @@ def connect() -> sqlite3.Connection:
 def init() -> None:
     conn = connect()
     try:
-        # One row per prompt sent to a provider. A fallback chain that tries
-        # three providers makes three rows. status is 'running', 'ok' or 'error';
-        # a 'running' row whose process died stays that way (shown as unfinished).
+        # One row per prompt sent to an AI provider (kind 'ai'), or per request
+        # to a web API through the proxy (kind 'api'; provider is the service
+        # name). A fallback chain that tries three providers makes three rows.
+        # status is 'running', 'ok' or 'error'; a 'running' row whose process
+        # died stays that way (shown as unfinished).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS calls (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +33,7 @@ def init() -> None:
                 provider           TEXT NOT NULL,
                 model              TEXT,
                 local              INTEGER NOT NULL,   -- 1 for Ollama on this machine
-                via                TEXT NOT NULL,      -- 'ask' (/api/ask) or 'ollama-proxy'
+                via                TEXT NOT NULL,      -- 'ask', 'ollama-proxy', 'proxy' or 'imported'
                 status             TEXT NOT NULL,
                 error              TEXT,
                 duration_ms        REAL,
@@ -55,7 +58,18 @@ def init() -> None:
                 cpu_peak           REAL
             )
         """)
+        # Added after the first release; ALTER for databases made before then
+        for col in ("kind TEXT NOT NULL DEFAULT 'ai'",
+                    "endpoint TEXT",        # proxied requests: method and path, e.g. "GET /ws/2/recording"
+                    "http_status INTEGER",
+                    "bytes_sent INTEGER",   # request body size
+                    "bytes_received INTEGER"):
+            try:
+                conn.execute(f"ALTER TABLE calls ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.execute("CREATE INDEX IF NOT EXISTS calls_started ON calls (started_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS calls_provider ON calls (provider, started_at)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS gpu_samples (
                 call_id  INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,

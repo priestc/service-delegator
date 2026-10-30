@@ -1,0 +1,15 @@
+# A user service (no sudo needed; starts at boot because lingering is on):
+#   cp service-delegator.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now service-delegator.service
+[Unit]
+Description=Service Delegator (AI prompt routing and performance log)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/service-delegator serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

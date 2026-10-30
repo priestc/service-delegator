@@ -13,8 +13,8 @@ import json
 import time
 from dataclasses import dataclass, field
 
-from ai_delegator import db, gpu
-from ai_delegator.providers import PROVIDERS, ProviderError, Request, Result
+from service_delegator import db, gpu
+from service_delegator.providers import PROVIDERS, ProviderError, Request, Result
 
 COOLOFF_MINUTES = 5
 PREVIEW_CHARS = 2000
@@ -119,7 +119,7 @@ def ask(task_name: str, req: Request, project: str | None = None,
                 notes.append(f"{route['provider']}: unknown provider")
                 continue
             if not p.configured():
-                notes.append(f"{p.name}: no API key (run: ai-delegator set-key {p.name} KEY)")
+                notes.append(f"{p.name}: no API key (run: service-delegator set-key {p.name} KEY)")
                 continue
             last = i == len(routes) - 1
             if not last and (why := _cooling_off(conn, p.name)):

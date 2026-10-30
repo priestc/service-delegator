@@ -1,15 +1,15 @@
 """Client for projects that send prompts through the delegator.
 
-Uses only the standard library, so a project can depend on ai-delegator or
+Uses only the standard library, so a project can depend on service-delegator or
 simply copy this file.
 
-    from ai_delegator.client import ask
+    from service_delegator.client import ask
 
     answer = ask("song-year", "What year was 'Yesterday' by The Beatles released?",
                  project="radioserver", max_tokens=20)
     print(answer["text"], answer["provider"], answer["duration_ms"])
 
-The server is at $AI_DELEGATOR_URL, default http://127.0.0.1:5055.
+The server is at $SERVICE_DELEGATOR_URL, default http://127.0.0.1:5055.
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def ask(task: str, prompt: str | None = None, *, project: str | None = None,
             body[k] = v
     if images:
         body["images"] = [base64.standard_b64encode(im).decode("ascii") for im in images]
-    base = (url or os.environ.get("AI_DELEGATOR_URL") or DEFAULT_URL).rstrip("/")
+    base = (url or os.environ.get("SERVICE_DELEGATOR_URL") or DEFAULT_URL).rstrip("/")
     req = urllib.request.Request(f"{base}/api/ask", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -60,7 +60,7 @@ def ask(task: str, prompt: str | None = None, *, project: str | None = None,
         try:
             data = json.load(e)
         except ValueError:
-            raise DelegatorError(f"AI delegator returned HTTP {e.code}")
+            raise DelegatorError(f"service delegator returned HTTP {e.code}")
         raise DelegatorError(data.get("error") or f"HTTP {e.code}", data.get("notes"))
     except urllib.error.URLError as e:
-        raise DelegatorError(f"Could not reach the AI delegator at {base}: {e.reason}")
+        raise DelegatorError(f"Could not reach the service delegator at {base}: {e.reason}")

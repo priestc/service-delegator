@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Callable
 
-from ai_delegator import config
+from service_delegator import config
 
 DEFAULT_MAX_TOKENS = 4096
 CLOUD_TIMEOUT = 120    # seconds per request

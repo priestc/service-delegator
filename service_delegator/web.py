@@ -1,6 +1,7 @@
-"""HTTP server: the /api/ask endpoint projects call, an Ollama-compatible
-proxy that logs local calls, and the web pages for watching performance and
-choosing which provider handles each task."""
+"""HTTP server: the /api/ask endpoint projects call for AI prompts, an
+Ollama-compatible proxy that logs local calls, the logging proxy for web APIs
+(proxy.py), and the web pages for watching performance and choosing which
+provider handles each AI task."""
 from __future__ import annotations
 
 import base64
@@ -12,8 +13,9 @@ import time
 import httpx
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from ai_delegator import config, core, db, gpu, pages
-from ai_delegator.providers import PROVIDERS, Image, ProviderError, Request, ollama_metrics, sniff_media_type
+from service_delegator import config, core, db, gpu, pages, proxy
+from service_delegator.providers import PROVIDERS, Image, ProviderError, Request, ollama_metrics, sniff_media_type
+from service_delegator.services import SERVICES
 
 app = Flask(__name__)
 
@@ -204,6 +206,17 @@ def ollama_proxy(project, rest):
     return _passthrough(f"api/{rest}" if rest else "")
 
 
+# ---- Web API proxy ----
+
+@app.route("/proxy/<project>/<service>/", defaults={"rest": ""},
+           methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+@app.route("/proxy/<project>/<service>/<path:rest>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+def api_proxy(project, service, rest):
+    """Forward to the service and log it. Point a project's base URL for a
+    service at http://<host>:5055/proxy/<project>/<service>."""
+    return proxy.handle(project, service, rest)
+
+
 # ---- Stats and logs ----
 
 def _since(hours: float | None) -> str:
@@ -214,7 +227,7 @@ def _since(hours: float | None) -> str:
 
 def _filters() -> tuple[str, list]:
     where, params = ["started_at >= ?"], [_since(float(request.args.get("hours") or 0))]
-    for k in ("project", "provider", "task", "model", "status"):
+    for k in ("project", "provider", "task", "model", "status", "kind"):
         v = request.args.get(k)
         if v:
             if k == "project" and v == "(none)":
@@ -269,7 +282,8 @@ def api_stats():
             groups.setdefault(key(r), []).append(r)
         return groups
 
-    by_model = [{"provider": p, "model": m, "local": PROVIDERS[p].local if p in PROVIDERS else False, **summarize(g)}
+    by_model = [{"provider": p, "model": m, "kind": g[0]["kind"],
+                 "local": PROVIDERS[p].local if p in PROVIDERS else False, **summarize(g)}
                 for (p, m), g in grouped(lambda r: (r["provider"], r["model"])).items()]
     by_project = [{"project": p, **summarize(g)} for p, g in grouped(lambda r: r["project"]).items()]
     by_task = [{"task": t, **summarize(g)} for t, g in grouped(lambda r: r["task"]).items()]
@@ -281,7 +295,8 @@ def api_stats():
     })
 
 
-_CALL_LIST_COLS = ("id, started_at, project, task, provider, model, local, via, status, error, duration_ms, "
+_CALL_LIST_COLS = ("id, started_at, project, task, provider, model, local, via, kind, endpoint, http_status, "
+                   "status, error, duration_ms, "
                    "input_tokens, output_tokens, n_images, eval_ms, gpu_peak_junction, gpu_peak_power, gpu_peak_fan, "
                    "substr(prompt_preview, 1, 160) AS prompt_preview")
 
@@ -291,7 +306,7 @@ def api_calls():
     where, params = _filters()
     limit = min(int(request.args.get("limit", 100)), 1000)
     with db.connect() as conn:
-        rows = conn.execute(f"SELECT {_CALL_LIST_COLS} FROM calls WHERE {where} ORDER BY id DESC LIMIT ?",
+        rows = conn.execute(f"SELECT {_CALL_LIST_COLS} FROM calls WHERE {where} ORDER BY started_at DESC, id DESC LIMIT ?",
                             (*params, limit)).fetchall()
     return jsonify({"calls": [dict(r) for r in rows]})
 
@@ -375,7 +390,7 @@ def api_task_test(name):
     prompt = (request.get_json(silent=True) or {}).get("prompt") or "What is 2+2? Reply with just the number."
     try:
         a = core.ask(name, Request(messages=[{"role": "user", "content": prompt}], max_tokens=0),
-                     project="ai-delegator test")
+                     project="service-delegator test")
     except core.DelegatorError as e:
         return jsonify({"error": str(e), "notes": e.notes}), 502
     return jsonify({"text": a.text, "provider": a.provider, "model": a.model, "duration_ms": a.duration_ms,
@@ -414,10 +429,35 @@ def api_provider_test(name):
     try:
         a = core.ask("provider-test", Request(messages=[{"role": "user", "content":
                      "What is 2+2? Reply with just the number."}], max_tokens=0),
-                     project="ai-delegator test", provider=name, model=model)
+                     project="service-delegator test", provider=name, model=model)
     except core.DelegatorError as e:
         return jsonify({"error": "; ".join(e.notes) or str(e)}), 502
     return jsonify({"text": a.text, "model": a.model, "duration_ms": a.duration_ms, "call_id": a.call_id})
+
+
+@app.get("/api/services")
+def api_services():
+    """The web APIs the proxy knows, with each one's numbers over ?hours=N
+    (default a week)."""
+    hours = float(request.args.get("hours") or 168)
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT provider, COUNT(*) AS calls, SUM(status='error') AS errors, AVG(duration_ms) AS avg_ms, "
+            "MAX(started_at) AS last_call, GROUP_CONCAT(DISTINCT project) AS projects "
+            "FROM calls WHERE kind='api' AND started_at >= ? GROUP BY provider", (_since(hours),)).fetchall()
+        stats = {r["provider"]: dict(r) for r in rows}
+        out = []
+        for s in SERVICES.values():
+            last_err = conn.execute(
+                "SELECT started_at, error FROM calls WHERE provider=? AND kind='api' AND status='error' "
+                "ORDER BY id DESC LIMIT 1", (s.name,)).fetchone()
+            st = stats.get(s.name, {})
+            out.append({"name": s.name, "display": s.display, "base_url": s.base_url, "used_by": s.used_by,
+                        "notes": s.notes, "calls": st.get("calls", 0), "errors": st.get("errors", 0),
+                        "avg_ms": round(st["avg_ms"], 1) if st.get("avg_ms") is not None else None,
+                        "last_call": st.get("last_call"), "projects": st.get("projects"),
+                        "last_error": dict(last_err) if last_err else None})
+    return jsonify({"services": out})
 
 
 # ---- Pages ----
@@ -437,9 +477,9 @@ def tasks_page():
     return Response(pages.TASKS, mimetype="text/html")
 
 
-@app.get("/providers")
-def providers_page():
-    return Response(pages.PROVIDERS, mimetype="text/html")
+@app.get("/services")
+def services_page():
+    return Response(pages.SERVICES, mimetype="text/html")
 
 
 def run(host: str, port: int) -> None:

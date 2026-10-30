@@ -1,4 +1,4 @@
-"""Settings live in ~/.ai-delegator.conf (INI):
+"""Settings live in ~/.service-delegator.conf (INI):
 
     [api]
     anthropic_key = sk-ant-...
@@ -7,7 +7,7 @@
     [server]
     port = 5055
     ollama_url = http://127.0.0.1:11434
-    db_path = ~/.local/share/ai-delegator/delegator.db
+    db_path = ~/.local/share/service-delegator/delegator.db
 """
 from __future__ import annotations
 
@@ -15,11 +15,23 @@ import configparser
 import os
 from pathlib import Path
 
-CONF_PATH = Path.home() / ".ai-delegator.conf"
+CONF_PATH = Path.home() / ".service-delegator.conf"
+# Before the rename from ai-delegator; moved to the new names on first run
+_OLD_CONF_PATH = Path.home() / ".ai-delegator.conf"
+_OLD_DATA_DIR = Path.home() / ".local/share/ai-delegator"
 
 DEFAULT_PORT = 5055
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_DB_PATH = "~/.local/share/ai-delegator/delegator.db"
+DEFAULT_DB_PATH = "~/.local/share/service-delegator/delegator.db"
+
+
+def migrate_old_names() -> None:
+    """Move the config file and data directory from their ai-delegator names."""
+    if _OLD_CONF_PATH.exists() and not CONF_PATH.exists():
+        _OLD_CONF_PATH.rename(CONF_PATH)
+    new_dir = Path(os.path.expanduser(DEFAULT_DB_PATH)).parent
+    if _OLD_DATA_DIR.exists() and not new_dir.exists():
+        _OLD_DATA_DIR.rename(new_dir)
 
 
 def _read() -> configparser.ConfigParser:

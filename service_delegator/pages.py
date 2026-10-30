@@ -88,14 +88,14 @@ function statusBadge(s, error) {
 
 
 def _page(title: str, here: str, body: str, script: str, chart: bool = False) -> str:
-    links = [("/", "Overview"), ("/tasks", "Tasks"), ("/providers", "Providers")]
+    links = [("/", "Overview"), ("/tasks", "AI tasks"), ("/services", "Services")]
     nav = "".join(f'<a href="{href}"{" class=here" if href == here else ""}>{label}</a>' for href, label in links)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title} &mdash; AI Delegator</title>
+  <title>{title} &mdash; Service Delegator</title>
   {'<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>' if chart else ''}
   <style>{_CSS}</style>
 </head>
@@ -110,20 +110,21 @@ def _page(title: str, here: str, body: str, script: str, chart: bool = False) ->
 </html>"""
 
 
-OVERVIEW = _page("AI Delegator", "/", """
+OVERVIEW = _page("Service Delegator", "/", """
   <div class="filters" id="periods">
     <button data-hours="24">24 hours</button>
     <button data-hours="168" class="active">7 days</button>
     <button data-hours="720">30 days</button>
     <button data-hours="0">All</button>
     <select id="f-project"><option value="">All projects</option></select>
-    <select id="f-provider"><option value="">All providers</option></select>
+    <select id="f-kind"><option value="">AI and web APIs</option><option value="ai">AI only</option><option value="api">Web APIs only</option></select>
+    <select id="f-provider"><option value="">All services</option></select>
   </div>
   <div class="card"><div class="tiles" id="tiles"></div></div>
   <div class="card">
-    <h2>By model</h2>
+    <h2>By service / model</h2>
     <div class="scroll"><table>
-      <thead><tr><th>Provider / model</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Avg time</th><th class="num">Median</th><th class="num">95th %</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Tokens/s</th><th class="num">GPU peak</th><th class="num">Power peak</th><th class="num">Fan peak</th></tr></thead>
+      <thead><tr><th>Service / model</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Avg time</th><th class="num">Median</th><th class="num">95th %</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Tokens/s</th><th class="num">GPU peak</th><th class="num">Power peak</th><th class="num">Fan peak</th></tr></thead>
       <tbody id="by-model"></tbody>
     </table></div>
   </div>
@@ -137,7 +138,7 @@ OVERVIEW = _page("AI Delegator", "/", """
   <div class="card">
     <h2>Recent calls</h2>
     <div class="scroll"><table>
-      <thead><tr><th>Time</th><th>Project</th><th>Task</th><th>Provider / model</th><th></th><th class="num">Duration</th><th class="num">Tokens in / out</th><th class="num">GPU peak</th><th>Prompt</th></tr></thead>
+      <thead><tr><th>Time</th><th>Project</th><th>Task</th><th>Service / model</th><th></th><th class="num">Duration</th><th class="num">Tokens in / out</th><th class="num">GPU peak</th><th>Prompt / request</th></tr></thead>
       <tbody id="calls"></tbody>
     </table></div>
   </div>
@@ -146,8 +147,10 @@ let hours = 168;
 function qs() {
   const p = new URLSearchParams({hours});
   const proj = document.getElementById('f-project').value, prov = document.getElementById('f-provider').value;
+  const kind = document.getElementById('f-kind').value;
   if (proj) p.set('project', proj);
   if (prov) p.set('provider', prov);
+  if (kind) p.set('kind', kind);
   return p.toString();
 }
 function tile(v, l) { return `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`; }
@@ -164,7 +167,7 @@ async function load() {
       tile(temp(t.peak_junction, 100), 'GPU peak (local)')].join('')
       : '<div class="muted">No calls in this period.</div>';
     document.getElementById('by-model').innerHTML = s.by_model.map(r => `<tr>
-      <td>${esc(r.provider)} <span class="muted">${esc(r.model || '')}</span> ${r.local ? '<span class="badge local">local</span>' : ''}</td>
+      <td>${esc(r.provider)} <span class="muted">${esc(r.model || '')}</span> ${r.local ? '<span class="badge local">local</span>' : ''}${r.kind === 'api' ? '<span class="badge">web API</span>' : ''}</td>
       <td class="num">${fmtNum(r.calls)}</td><td class="num ${r.errors ? 'err' : ''}">${fmtNum(r.errors)}</td>
       <td class="num">${fmtMs(r.avg_ms)}</td><td class="num">${fmtMs(r.p50_ms)}</td><td class="num">${fmtMs(r.p95_ms)}</td>
       <td class="num">${fmtNum(r.input_tokens)}</td><td class="num">${fmtNum(r.output_tokens)}</td>
@@ -182,9 +185,9 @@ async function load() {
     document.getElementById('calls').innerHTML = c.calls.map(r => `<tr class="link" data-id="${r.id}">
       <td class="muted">${esc(r.started_at)}</td><td>${esc(r.project ?? '')}</td><td>${esc(r.task ?? '')}</td>
       <td>${esc(r.provider)} <span class="muted">${esc(r.model || '')}</span></td>
-      <td>${statusBadge(r.status, r.error)}${r.n_images ? ` <span class="badge">${r.n_images} image${r.n_images > 1 ? 's' : ''}</span>` : ''}</td>
+      <td>${statusBadge(r.status, r.error)}${r.http_status ? ` <span class="muted">${r.http_status}</span>` : ''}${r.via === 'imported' ? ' <span class="badge">from radioserver</span>' : ''}${r.n_images ? ` <span class="badge">${r.n_images} image${r.n_images > 1 ? 's' : ''}</span>` : ''}</td>
       <td class="num">${fmtMs(r.duration_ms)}</td>
-      <td class="num">${fmtNum(r.input_tokens)} / ${fmtNum(r.output_tokens)}</td>
+      <td class="num">${r.kind === 'api' ? '' : fmtNum(r.input_tokens) + ' / ' + fmtNum(r.output_tokens)}</td>
       <td class="num">${r.local ? temp(r.gpu_peak_junction, 100) : ''}</td>
       <td class="muted">${esc(r.prompt_preview)}</td></tr>`).join('')
       || '<tr><td colspan="9" class="muted">No calls.</td></tr>';
@@ -202,6 +205,7 @@ document.getElementById('periods').addEventListener('click', e => {
 });
 document.getElementById('f-project').addEventListener('change', load);
 document.getElementById('f-provider').addEventListener('change', load);
+document.getElementById('f-kind').addEventListener('change', load);
 document.getElementById('calls').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-id]');
   if (tr) location.href = '/calls/' + tr.dataset.id;
@@ -221,19 +225,24 @@ CALL = _page("Call", "", """
     <h2>GPU and CPU during the call</h2>
     <canvas id="chart" height="90"></canvas>
   </div>
-  <div class="card"><h2>Prompt</h2><pre id="prompt"></pre></div>
-  <div class="card"><h2>Response</h2><pre id="response"></pre></div>
+  <div class="card"><h2 id="prompt-title">Prompt</h2><pre id="prompt"></pre></div>
+  <div class="card" id="response-card"><h2>Response</h2><pre id="response"></pre></div>
 """, """
 const CALL_ID = __CALL_ID__;
 function tile(v, l) { return `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`; }
 fetchJSON('/api/calls/' + CALL_ID).then(c => {
-  document.querySelector('h1').textContent = `${c.provider} \\u00b7 ${c.model || ''}`;
-  document.title = `Call ${CALL_ID} \\u2014 AI Delegator`;
+  document.querySelector('h1').textContent = c.kind === 'api' ? `${c.provider} \\u00b7 ${c.endpoint || ''}` : `${c.provider} \\u00b7 ${c.model || ''}`;
+  document.title = `Call ${CALL_ID} \\u2014 Service Delegator`;
   const tiles = [
     tile(statusBadge(c.status, c.error), 'Status'), tile(esc(c.started_at), 'Started'),
     tile(esc(c.project ?? '\\u2014'), 'Project'), tile(esc(c.task ?? '\\u2014'), 'Task'),
-    tile(fmtMs(c.duration_ms), 'Duration'), tile(fmtNum(c.input_tokens), 'Tokens in'),
-    tile(fmtNum(c.output_tokens), 'Tokens out')];
+    tile(fmtMs(c.duration_ms), 'Duration')];
+  if (c.kind === 'api') {
+    tiles.push(tile(c.http_status ?? '\\u2014', 'HTTP status'), tile(fmtNum(c.bytes_sent), 'Bytes sent'),
+               tile(fmtNum(c.bytes_received), 'Bytes received'));
+  } else {
+    tiles.push(tile(fmtNum(c.input_tokens), 'Tokens in'), tile(fmtNum(c.output_tokens), 'Tokens out'));
+  }
   if (c.cache_read_tokens) tiles.push(tile(fmtNum(c.cache_read_tokens), 'Read from cache'));
   if (c.n_images) tiles.push(tile(c.n_images, 'Images'));
   if (c.local) {
@@ -252,6 +261,10 @@ fetchJSON('/api/calls/' + CALL_ID).then(c => {
   document.getElementById('error').textContent = c.error || '';
   document.getElementById('prompt').textContent = c.prompt_preview || '';
   document.getElementById('response').textContent = c.response_preview || '';
+  if (c.kind === 'api') {
+    document.getElementById('prompt-title').textContent = 'Request';
+    document.getElementById('response-card').style.display = c.response_preview ? '' : 'none';
+  }
   if (c.samples.length) {
     document.getElementById('gpu-card').style.display = '';
     const line = (label, value, color, axis) => ({label, data: c.samples.map(value), borderColor: color,
@@ -385,20 +398,39 @@ load();
 """)
 
 
-PROVIDERS = _page("Providers", "/providers", """
+SERVICES = _page("Services", "/services", """
   <div class="card">
-    <h2>Providers</h2>
+    <h2>AI providers</h2>
     <div class="scroll"><table>
       <thead><tr><th>Provider</th><th>API key</th><th>Default model</th><th>Last error</th><th></th></tr></thead>
       <tbody id="providers"></tbody>
     </table></div>
-    <div class="muted" style="margin-top:.8rem">Set a key on the server with <code>ai-delegator set-key &lt;provider&gt; &lt;key&gt;</code>, or copy radioserver&rsquo;s keys with <code>ai-delegator import-radioserver-keys</code>. Keys are kept in <code>~/.ai-delegator.conf</code>.</div>
+    <div class="muted" style="margin-top:.8rem">Set a key on the server with <code>service-delegator set-key &lt;provider&gt; &lt;key&gt;</code>, or copy radioserver&rsquo;s keys with <code>service-delegator import-radioserver-keys</code>. Keys are kept in <code>~/.service-delegator.conf</code>.</div>
   </div>
   <div class="card">
     <h2>Local</h2>
     <div id="local"></div>
   </div>
+  <div class="card">
+    <h2>Web APIs <span class="muted" style="text-transform:none;letter-spacing:0">&middot; last 7 days</span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Service</th><th>Used by</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Avg time</th><th>Last call</th><th>Proxy URL (replaces the base URL)</th></tr></thead>
+      <tbody id="apis"></tbody>
+    </table></div>
+    <div class="muted" style="margin-top:.8rem">A project sends its requests to the proxy URL instead of the service; they&rsquo;re passed on unchanged (including the project&rsquo;s own API key) and timed. Replace <code>&lt;project&gt;</code> with the project&rsquo;s name.</div>
+  </div>
 """, """
+fetchJSON('/api/services').then(d => {
+  document.getElementById('apis').innerHTML = d.services.map(s => `<tr>
+    <td>${esc(s.display)}<div class="muted">${esc(s.base_url)}</div>${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
+    <td class="muted">${esc(s.used_by)}</td>
+    <td class="num">${fmtNum(s.calls)}</td><td class="num ${s.errors ? 'err' : ''}">${fmtNum(s.errors)}</td>
+    <td class="num">${fmtMs(s.avg_ms)}</td>
+    <td>${s.last_call ? `<span class="muted">${esc(s.last_call)}</span>` : ''}
+      ${s.last_error ? `<div class="err" title="${esc(s.last_error.error)}">Last error ${esc(s.last_error.started_at)}: ${esc((s.last_error.error || '').slice(0, 80))}</div>` : ''}</td>
+    <td><code>${esc(location.origin)}/proxy/&lt;project&gt;/${esc(s.name)}</code></td></tr>`).join('');
+}).catch(e => showError('Could not load web APIs: ' + e.message));
+
 fetchJSON('/api/providers').then(d => {
   document.getElementById('providers').innerHTML = d.providers.map(p => `<tr data-name="${p.name}">
     <td>${esc(p.display)} ${p.local ? '<span class="badge local">local</span>' : ''}</td>

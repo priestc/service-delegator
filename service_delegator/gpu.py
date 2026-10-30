@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import time
 
-from ai_delegator import db
+from service_delegator import db
 
 SAMPLE_SECONDS = 1.0
 

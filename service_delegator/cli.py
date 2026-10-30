@@ -1,4 +1,4 @@
-"""ai-delegator command line."""
+"""service-delegator command line."""
 from __future__ import annotations
 
 import argparse
@@ -6,8 +6,8 @@ import configparser
 import sys
 from pathlib import Path
 
-from ai_delegator import config
-from ai_delegator.providers import PROVIDERS
+from service_delegator import config
+from service_delegator.providers import PROVIDERS
 
 
 def _set_key(args) -> int:
@@ -36,6 +36,43 @@ def _import_radioserver(args) -> int:
     return 0
 
 
+def _import_latency(args) -> int:
+    """Rows exported from radioserver's LookupLatency table (JSON list of
+    {service, kind, title, artist, seconds, requests, ok, result, created_at})
+    become calls with via='imported'. Each row was one whole lookup, which for
+    MusicBrainz and Discogs could be several HTTP requests."""
+    import datetime
+    import json
+
+    from service_delegator import db
+
+    db.init()
+    rows = json.loads(Path(args.file).read_text())
+    names = {"MusicBrainz": "musicbrainz", "Discogs": "discogs"}
+    conn = db.connect()
+    try:
+        if conn.execute("SELECT 1 FROM calls WHERE via='imported' LIMIT 1").fetchone():
+            print("radioserver's timings were already imported", file=sys.stderr)
+            return 1
+        for r in rows:
+            when = datetime.datetime.fromisoformat(r["created_at"]).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            database = r["kind"] == "database"
+            conn.execute(
+                "INSERT INTO calls (started_at, project, task, provider, local, via, kind, status, error, duration_ms, "
+                "prompt_preview, response_preview, endpoint) VALUES (?,?,?,?,0,'imported',?,?,?,?,?,?,?)",
+                (when, "radioserver", "song-year", names.get(r["service"], r["service"]),
+                 "api" if database else "ai", "ok" if r["ok"] else "error", None if r["ok"] else r["result"],
+                 round(r["seconds"] * 1000, 1), f"{r['title']} \u2014 {r['artist']} ({r['kind']})",
+                 r["result"] if r["ok"] else None,
+                 f"lookup ({r['requests']} requests)" if database and r.get("requests") else None),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"Imported {len(rows)} timings from radioserver")
+    return 0
+
+
 def _providers(args) -> int:
     for p in PROVIDERS.values():
         state = "local" if p.local else ("key set" if p.configured() else "no key")
@@ -44,7 +81,7 @@ def _providers(args) -> int:
 
 
 def _ask(args) -> int:
-    from ai_delegator.client import DelegatorError, ask
+    from service_delegator.client import DelegatorError, ask
 
     try:
         a = ask(args.task, args.prompt, project=args.project, provider=args.provider, model=args.model,
@@ -61,7 +98,7 @@ def _ask(args) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="ai-delegator", description=__doc__)
+    parser = argparse.ArgumentParser(prog="service-delegator", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="Run the web server and API")
@@ -75,6 +112,9 @@ def main() -> None:
     s = sub.add_parser("import-radioserver-keys", help="Copy API keys from radioserver's config")
     s.add_argument("--path", default="~/.radioserver.conf")
 
+    s = sub.add_parser("import-radioserver-latency", help="Import radioserver's lookup timings (JSON export)")
+    s.add_argument("file")
+
     sub.add_parser("providers", help="List providers and whether their keys are set")
 
     s = sub.add_parser("ask", help="Send a prompt through a running server")
@@ -87,12 +127,13 @@ def main() -> None:
     s.add_argument("--url")
 
     args = parser.parse_args()
+    config.migrate_old_names()
     if args.cmd == "serve":
-        from ai_delegator import web
+        from service_delegator import web
         web.run(args.host, args.port or config.port())
         return
     sys.exit({"set-key": _set_key, "import-radioserver-keys": _import_radioserver,
-              "providers": _providers, "ask": _ask}[args.cmd](args))
+              "import-radioserver-latency": _import_latency, "providers": _providers, "ask": _ask}[args.cmd](args))
 
 
 if __name__ == "__main__":
