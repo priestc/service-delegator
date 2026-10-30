@@ -18,7 +18,7 @@ ai-delegator import-radioserver-keys      # or: ai-delegator set-key claude sk-a
 ai-delegator serve                        # http://<host>:5055
 ```
 
-`ai-delegator.service` runs it under systemd.
+`ai-delegator.service` runs it as a systemd user service (instructions at the top of the file).
 
 ## Using it from a project
 

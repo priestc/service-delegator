@@ -1,15 +1,15 @@
+# A user service (no sudo needed; starts at boot because lingering is on):
+#   cp ai-delegator.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now ai-delegator.service
 [Unit]
 Description=AI Delegator (AI prompt routing and performance log)
-After=network.target ollama.service
+After=network-online.target
 
 [Service]
 Type=simple
-User=chris
-ExecStart=/home/chris/.local/bin/ai-delegator serve
+ExecStart=%h/.local/bin/ai-delegator serve
 Restart=on-failure
 RestartSec=5
-StandardOutput=journal
-StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
