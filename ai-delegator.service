@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Delegator (AI prompt routing and performance log)
+After=network.target ollama.service
+
+[Service]
+Type=simple
+User=chris
+ExecStart=/home/chris/.local/bin/ai-delegator serve
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
